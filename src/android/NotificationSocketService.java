@@ -8,6 +8,9 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.arch.lifecycle.LifecycleOwner;
+import android.arch.lifecycle.LifecycleService;
+import android.arch.lifecycle.Observer;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -16,17 +19,17 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioAttributes;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.os.VibrationEffect;
 import android.support.annotation.Nullable;
 import android.support.v4.app.NotificationCompat;
-import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
-import com.mapon.mapongo.R;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -35,20 +38,25 @@ import java.net.URISyntaxException;
 import java.util.Date;
 import java.util.List;
 
+import fr.naxxum.alumni.BuildConfig;
+import fr.naxxum.alumni.MainActivity;
+import fr.naxxum.alumni.R;
 import io.socket.client.Ack;
 import io.socket.client.IO;
 import io.socket.client.Socket;
 import io.socket.emitter.Emitter;
 
-public class NotificationSocketService extends Service {
+public class NotificationSocketService extends LifecycleService {
 
     private static final String ACTION_START = "drivinglog.service.start";
     private static final String ACTION_STOP = "drivinglog.service.stop";
 
     private static final String INTENT_EXTRA_CONNECT_URL = "connect_url";
+    private static final String INTENT_EXTRA_USER_ID = "user_id";
 
     private static final String PREF_ACTION = "pref_action";
     private static final String PREF_CONNECT_URL = "pref_connect_url";
+    private static final String PREF_USER_ID = "pref_user_id";
 
     private static final String PREFS_NAME = "NotificationSocketServiceFile";
 
@@ -72,6 +80,7 @@ public class NotificationSocketService extends Service {
     private static PackageManager pm = null;
 
     private String connectUrl;
+    private String userId;
 
     private static PowerManager.WakeLock wakeLock;
     private static final Object LOCK = NotificationSocketService.class;
@@ -82,8 +91,9 @@ public class NotificationSocketService extends Service {
     protected boolean mMainAppShowAlerts = true;
 
     private BroadcastReceiver notificationReceiver = null;
+    private Observer<Intent> obs = null;
 
-    public static void start(Context context, String connectUrl) {
+    public static void start(Context context, String connectUrl,String userId) {
         Log.d("NotificationService", "NotificationSocketService STARTED");
 
         // remove all notifications from status bar. This method gets called when app is started
@@ -93,6 +103,7 @@ public class NotificationSocketService extends Service {
         Intent intent = new Intent(context, NotificationSocketService.class);
         intent.setAction(ACTION_START);
         intent.putExtra(INTENT_EXTRA_CONNECT_URL, connectUrl);
+        intent.putExtra(INTENT_EXTRA_USER_ID, userId);
         context.startService(intent);
     }
 
@@ -107,29 +118,35 @@ public class NotificationSocketService extends Service {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
+        super.onBind(intent);
         return null;
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d("NotificationService", "onStartCommand METHOD");
+        Log.d("NotificationService", "Connected salah");
 
         String action;
         if (intent != null && intent.getAction() != null) {
             String intentConnectUrl = intent.getStringExtra(INTENT_EXTRA_CONNECT_URL);
+            String intentUserId = intent.getStringExtra(INTENT_EXTRA_USER_ID);
 
             SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
             SharedPreferences.Editor editor = settings.edit();
             editor.putString(PREF_ACTION, intent.getAction());
             editor.putString(PREF_CONNECT_URL,intentConnectUrl );
+            editor.putString(PREF_USER_ID,intentUserId );
             editor.apply();
 
             action = intent.getAction();
             this.connectUrl = intentConnectUrl;
+            this.userId = intentUserId;
         } else {
             SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
             action = settings.getString(PREF_ACTION, PREF_ACTION_DEFAULT);
             this.connectUrl = settings.getString(PREF_CONNECT_URL, PREF_CONNECT_URL_DEFAULT);
+            this.userId = settings.getString(PREF_USER_ID, PREF_CONNECT_URL_DEFAULT);
         }
 
         if (action.equals(ACTION_START)) {
@@ -158,7 +175,6 @@ public class NotificationSocketService extends Service {
                     .setContentText("Service running")
                     .setContentIntent(PendingIntent.getActivity(getApplicationContext(), 0,
                         notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT))
-                    .setSmallIcon(R.drawable.ic_go_colour)
                     .setColor(Color.parseColor("#98ca02"))
                     .setPriority(Notification.PRIORITY_MIN)
                     .setVibrate(null)
@@ -168,6 +184,10 @@ public class NotificationSocketService extends Service {
             startForeground(101, notification);
         } else if (action.equals(ACTION_STOP)) {
             if (mRunning) {
+                SharedPreferences settings = getSharedPreferences(PREFS_NAME, 0);
+                SharedPreferences.Editor editor = settings.edit();
+                editor.putString(PREF_USER_ID,"" );
+                this.userId = "";
                 disconnect();
                 stopListeningBroadcasts();
                 stopForeground(true);
@@ -189,12 +209,29 @@ public class NotificationSocketService extends Service {
                 socket = IO.socket(this.connectUrl, options);
 
                 Log.d("NotificationService", "SOCKET OPENED WITH URL: " + this.connectUrl);
+                try {
+                    JSONObject jsonData = new JSONObject("{\"roomId\": \"user-"+this.userId +"\"}");
+                    socket.emit("join",jsonData);
+
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+
+
                 socket.on(Socket.EVENT_RECONNECT, new Emitter.Listener() {
                     @Override
                     public void call(Object... args) {
                         Log.d("NotificationService", "EVENT_RECONNECT");
                         Log.d("NotificationService", "Emit getUndelivered");
                         socket.emit("getUndelivered");
+                        JSONObject jsonData = null;
+                        try {
+                            jsonData = new JSONObject("{\"roomId\": \"user-"+userId +"\"}");
+                            socket.emit("join",jsonData);
+                        } catch (JSONException e) {
+                            e.printStackTrace();
+                        }
+
                     }
                 });
                 socket.on(Socket.EVENT_CONNECT, new Emitter.Listener() {
@@ -222,6 +259,81 @@ public class NotificationSocketService extends Service {
                             broadcastEvent("user_connected", payload);
 
                             wakeUp();
+                        } catch (JSONException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+                socket.on("callPending", new Emitter.Listener() {
+                    @Override
+                    public void call(Object... args) {
+                        try {
+                            Log.d("NotificationService", "EVENT_CALL_PENDING");
+                            Log.d("NotificationService",args[0].toString());
+                            JSONObject payload = new JSONObject();
+                            payload.put("type", "callPending");
+                            broadcastEvent("callPending", payload);
+
+
+                            Intent alertIntent;
+                            alertIntent = new Intent(getApplicationContext(), MainActivity.class);
+                            alertIntent.setFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT|Intent.FLAG_ACTIVITY_NEW_TASK| Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                            if(args[0] != null){
+                                alertIntent.putExtra("ALUMNI_CALL",args[0].toString());
+                            }
+                            Log.d("NotificationService", "EVENT_CALL_PENDING");
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                NotificationManager notificationManager =
+                                        (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+                                AudioAttributes attributes = new AudioAttributes.Builder()
+                                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                        .setUsage(AudioAttributes.USAGE_ALARM)
+                                        .build();
+
+                                String CHANNEL_ID = BuildConfig.APPLICATION_ID.concat("_notification_id");
+                                String CHANNEL_NAME = BuildConfig.APPLICATION_ID.concat("_notification_name");
+                                assert notificationManager != null;
+
+                                NotificationChannel mChannel = notificationManager.getNotificationChannel(CHANNEL_ID);
+                                if (mChannel == null) {
+                                    mChannel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH);
+                                    notificationManager.createNotificationChannel(mChannel);
+                                }
+                                Intent fullScreenIntent = new Intent(getApplicationContext(), MainActivity.class);
+                                if(args[0] != null){
+                                    fullScreenIntent.putExtra("ALUMNI_CALL",args[0].toString());
+                                }
+                                fullScreenIntent.setFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT|Intent.FLAG_ACTIVITY_NEW_TASK| Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                                        Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                                 PendingIntent  p = PendingIntent
+                                        .getActivity(getApplicationContext(), 0, fullScreenIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+                                NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), CHANNEL_ID);
+                                long[] vibs = {0, 250, 250, 250,250,250,250};
+                                builder.setSmallIcon(R.mipmap.ic_launcher)
+                                        .setContentTitle(getString(R.string.app_name))
+                                        .setContentText("You have a pending call!")
+                                        .setColor(0x2dd36f)
+                                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                                        .setCategory(NotificationCompat.CATEGORY_CALL)
+                                        .setContentIntent(p)
+                                        .setAutoCancel(true)
+                                        .setVibrate(vibs)
+                                        .setOngoing(true);
+
+                                Notification notification = builder.build();
+                                notificationManager.notify(123, notification);
+                            } else {
+                                startActivity(alertIntent);
+                            }
+
+
+
+
+                            wakeUp();
+
                         } catch (JSONException e) {
                             e.printStackTrace();
                         }
@@ -291,6 +403,7 @@ public class NotificationSocketService extends Service {
                                     ack.call();
                                 }
                             }
+                            Log.d("NotificationService", "EVENT INCOMING DATA"+args[0].toString());
 
                             JSONObject eventData = new JSONObject(args[0].toString());
                             String event = eventData.getString("event");
@@ -396,7 +509,9 @@ public class NotificationSocketService extends Service {
             @Override
             public void onReceive(Context context, Intent intent) {
                 try {
-                    JSONObject eventData = new JSONObject(intent.getExtras().getString("userdata"));
+                    Log.d("NotificationService", "EMIT EVENT: " + intent.getExtras().getString("userdata","{}"));
+
+                    JSONObject eventData = new JSONObject(intent.getExtras().getString("userdata","{}"));
 
                     Log.d("NotificationService", "EMIT EVENT: " + eventData.toString());
 
@@ -408,7 +523,10 @@ public class NotificationSocketService extends Service {
                 }
             }
         };
-        LocalBroadcastManager.getInstance(this).registerReceiver(notificationReceiver, new IntentFilter(BROADCAST_OUTGOING_EVENT));
+        obs = (intent)->{
+            notificationReceiver.onReceive(this.getApplicationContext(),intent);
+        };
+        LocalBroadcastManager.getInstance().observe(this,obs);
 
         final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
             @Override
@@ -420,7 +538,11 @@ public class NotificationSocketService extends Service {
                 Log.d("NotificationService", "isBackground EVENT: " + String.valueOf(isBackground));
             }
         };
-        LocalBroadcastManager.getInstance(this).registerReceiver(stateReceiver, new IntentFilter(MAIN_APP_STATE_CHANGE_EVENT));
+        Observer<Intent> obs2 = (intent)->{
+            stateReceiver.onReceive(this,intent);
+        };
+
+        LocalBroadcastManager.getInstance().observe((LifecycleOwner) this,obs2);
 
         final BroadcastReceiver alertDisabledReceiver = new BroadcastReceiver() {
             @Override
@@ -432,12 +554,15 @@ public class NotificationSocketService extends Service {
                 Log.d("NotificationService", "isBackground EVENT: " + String.valueOf(isAlertsDisabled));
             }
         };
-        LocalBroadcastManager.getInstance(this).registerReceiver(alertDisabledReceiver, new IntentFilter(ALERT_DISABLED_EVENT));
+        Observer<Intent> obs3 = (intent)->{
+            alertDisabledReceiver.onReceive(this,intent);
+        };
+        LocalBroadcastManager.getInstance().observe((LifecycleOwner) this,obs3);
     }
 
     private void stopListeningBroadcasts() {
         if (notificationReceiver != null) {
-            LocalBroadcastManager.getInstance(this).unregisterReceiver(notificationReceiver);
+            LocalBroadcastManager.getInstance().removeObserver(obs);
         }
     }
 
@@ -459,7 +584,7 @@ public class NotificationSocketService extends Service {
                         "data: " + payload.toString() +
                         "}");
         intent.putExtras(b);
-        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcastSync(intent);
+        LocalBroadcastManager.getInstance().postValue(intent);
     }
 
     private void showAlert(String event, JSONObject payload, String alertMessage) {
@@ -489,7 +614,6 @@ public class NotificationSocketService extends Service {
 
         final NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), appName.replaceAll(" ", "_") + "_channel");
         builder
-                .setSmallIcon(R.drawable.ic_go_colour)
                 .setWhen(System.currentTimeMillis()).setAutoCancel(true)
                 .setContentTitle(messageTitle)
                 .setDefaults(Notification.DEFAULT_ALL)
@@ -527,8 +651,12 @@ public class NotificationSocketService extends Service {
             if (wakeLock == null) {
                 Log.d("NotificationService", "wakeUp wakeLock");
                 PowerManager pm = (PowerManager) getApplicationContext().getSystemService(Context.POWER_SERVICE);
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "my_wakelock");
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK  | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "alumni:wakelock");
+            }else{
+                Log.d("NotificationService", "There is a lock Acquired");
+
             }
+
         }
     }
 
@@ -536,5 +664,12 @@ public class NotificationSocketService extends Service {
         ApplicationInfo applicationInfo = getApplicationContext().getApplicationInfo();
         int stringId = applicationInfo.labelRes;
         return stringId == 0 ? applicationInfo.nonLocalizedLabel.toString() : getApplicationContext().getString(stringId);
+    }
+
+    private PendingIntent openScreen(int notificationId) {
+        Intent fullScreenIntent = new Intent(this, MainActivity.class);
+        fullScreenIntent.setFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT|Intent.FLAG_ACTIVITY_NEW_TASK| Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return PendingIntent.getActivity(this, 0, fullScreenIntent, PendingIntent.FLAG_UPDATE_CURRENT);
     }
 }

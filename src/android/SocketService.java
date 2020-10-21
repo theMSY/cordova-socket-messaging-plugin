@@ -4,7 +4,6 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
 import org.apache.cordova.CallbackContext;
@@ -18,6 +17,12 @@ import org.json.JSONObject;
  * This class echoes a string called from JavaScript.
  */
 public class SocketService extends CordovaPlugin {
+
+
+
+
+
+
     @Override
     public void onResume(boolean multitasking) {
         broadcastBackgroundState(false);
@@ -42,7 +47,7 @@ public class SocketService extends CordovaPlugin {
         Bundle b = new Bundle();
         b.putBoolean("isBackground", isBackground);
         intent.putExtras(b);
-        LocalBroadcastManager.getInstance(super.webView.getContext()).sendBroadcastSync(intent);
+        LocalBroadcastManager.getInstance().postValue(intent);
     }
 
     private void disableAlerts(boolean disable) {
@@ -51,19 +56,20 @@ public class SocketService extends CordovaPlugin {
         Bundle b = new Bundle();
         b.putBoolean("isDisabled", disable);
         intent.putExtras(b);
-        LocalBroadcastManager.getInstance(super.webView.getContext()).sendBroadcastSync(intent);
+        LocalBroadcastManager.getInstance().postValue(intent);
     }
 
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
         webView.getView().setFilterTouchesWhenObscured(true);
         if (action.equals("startService")) {
-            if (args.length() != 1) {
+            if (args.length() != 2) {
                 callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.INVALID_ACTION));
                 return false;
             } else {
                 String connectUrl = args.get(0).toString();
-                callbackContext.sendPluginResult(this.startService(connectUrl));
+                String userId = args.get(1).toString();
+                callbackContext.sendPluginResult(this.startService(connectUrl,userId));
                 return true;
             }
         } else if (action.equals("stopService")) {
@@ -87,7 +93,18 @@ public class SocketService extends CordovaPlugin {
             PluginResult result = this.getExtra(paramName);
             callbackContext.sendPluginResult(result);
             return PluginResult.Status.OK.ordinal() == result.getStatus();
-        } else if (action.equals("injectLangArray")) {
+        }
+        else if (action.equals("getCallData")) {
+            if (args.length() != 0) {
+                callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.INVALID_ACTION));
+                return false;
+            }
+            String paramName = "ALUMNI_CALL";
+            PluginResult result = this.getExtra(paramName);
+            callbackContext.sendPluginResult(result);
+            return PluginResult.Status.OK.ordinal() == result.getStatus();
+        }
+        else if (action.equals("injectLangArray")) {
             Log.d("SocketService", "injectLangArray");
             if (args.length() != 1) {
                 callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.INVALID_ACTION));
@@ -115,9 +132,9 @@ public class SocketService extends CordovaPlugin {
         return false;
     }
 
-    private PluginResult startService(String connectUrl) {
+    private PluginResult startService(String connectUrl,String userId) {
         Context context = this.cordova.getActivity().getApplicationContext();
-        NotificationSocketService.start(context, connectUrl);
+        NotificationSocketService.start(context, connectUrl,userId);
         return new PluginResult(PluginResult.Status.OK, "SERVICE STARTED");
     }
 

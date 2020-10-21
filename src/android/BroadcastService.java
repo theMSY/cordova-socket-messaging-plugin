@@ -1,13 +1,14 @@
 package com.socketservice;
 
 import android.annotation.TargetApi;
+import android.arch.lifecycle.LifecycleOwner;
+import android.arch.lifecycle.Observer;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
 import org.apache.cordova.CallbackContext;
@@ -27,8 +28,8 @@ public class BroadcastService extends CordovaPlugin {
 
     private static final String USERDATA = "userdata";
 
-    private java.util.Map<String,BroadcastReceiver> receiverMap =
-            new java.util.HashMap<String,BroadcastReceiver>(10);
+    private java.util.Map<String,Observer<Intent>> receiverMap =
+            new java.util.HashMap<String,Observer<Intent>>(10);
 
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
@@ -86,9 +87,9 @@ public class BroadcastService extends CordovaPlugin {
                     }
                 };
 
-                registerReceiver(r, new IntentFilter(eventName));
+                Observer<Intent> obs =  registerReceiver(r, new IntentFilter(eventName));
 
-                receiverMap.put(eventName, r);
+                receiverMap.put(eventName, obs);
             }
             callbackContext.success();
 
@@ -101,7 +102,7 @@ public class BroadcastService extends CordovaPlugin {
                 return false;
             }
 
-            BroadcastReceiver r = receiverMap.remove(eventName);
+            Observer<Intent> r = receiverMap.remove(eventName);
 
             if (r != null) {
                 Log.d(TAG, "removing event listener " + eventName);
@@ -148,16 +149,22 @@ public class BroadcastService extends CordovaPlugin {
     }
 
 
-    private void registerReceiver(BroadcastReceiver receiver, IntentFilter filter) {
-        LocalBroadcastManager.getInstance(super.webView.getContext()).registerReceiver(receiver,filter);
+    private Observer<Intent> registerReceiver(BroadcastReceiver receiver, IntentFilter filter) {
+        //LocalBroadcastManager.getInstance().registerReceiver(receiver,filter);
+        Observer<Intent> obs  = (intent)->{
+            receiver.onReceive(super.cordova.getActivity(), intent);
+        };
+        LocalBroadcastManager.getInstance().observe((LifecycleOwner) super.cordova.getActivity(),obs);
+        return obs;
     }
 
-    private void unregisterReceiver(BroadcastReceiver receiver) {
-        LocalBroadcastManager.getInstance(super.webView.getContext()).unregisterReceiver(receiver);
+    private void unregisterReceiver(Observer<Intent> receiver) {
+        LocalBroadcastManager.getInstance().removeObserver(receiver);
     }
 
     private boolean sendBroadcast(Intent intent) {
-        return LocalBroadcastManager.getInstance(super.webView.getContext()).sendBroadcast(intent);
+        LocalBroadcastManager.getInstance().postValue(intent);
+        return  false;
     }
 
     @TargetApi(Build.VERSION_CODES.KITKAT)
@@ -177,7 +184,7 @@ public class BroadcastService extends CordovaPlugin {
     @Override
     public void onDestroy() {
         // deregister receiver
-        for( BroadcastReceiver r : receiverMap.values() ) {
+        for( Observer r : receiverMap.values() ) {
             unregisterReceiver(r);
         }
 

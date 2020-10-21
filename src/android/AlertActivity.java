@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.support.v4.content.LocalBroadcastManager;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.TextView;
@@ -40,7 +39,7 @@ public class AlertActivity extends Activity {
                         "alertMessage: '" + alertMessage + "'" +
                         "}");
         intent.putExtras(b);
-        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcastSync(intent);
+        LocalBroadcastManager.getInstance().postValue(intent);
 
         Language language = new Language(getApplicationContext());
 

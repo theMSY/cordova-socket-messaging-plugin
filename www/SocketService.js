@@ -1,3 +1,4 @@
+cordova.define("cordova-plugin-socket-service.SocketService", function(require, exports, module) {
 var exec = require('cordova/exec');
 var channel = require('cordova/channel');
 
@@ -5,8 +6,8 @@ var socketservice = {
     injectLangArray: function (arg0, success, error) {
         return exec(success, error, "SocketService", "injectLangArray", [arg0]);
     },
-    startService: function (arg0, success, error) {
-        return exec(success, error, "SocketService", "startService", [arg0]);
+    startService: function (arg0,arg1, success, error) {
+        return exec(success, error, "SocketService", "startService", [arg0,arg1]);
     },
     stopService: function (arg0, success, error) {
         return exec(success, error, "SocketService", "stopService", [arg0]);
@@ -20,6 +21,9 @@ var socketservice = {
     getParam: function (arg0, success, error) {
         return exec(success, error, "SocketService", "getParam", [arg0]);
     },
+     getCallData: function ( success, error) {
+            return exec(success, error, "SocketService", "getCallData", []);
+        },
     isSocketAuthorized: function (success, error) {
         return exec(success, error, "SocketService", "isSocketAuthorized", []);
     },
@@ -73,3 +77,5 @@ var socketservice = {
 };
 
 module.exports = socketservice;
+
+});
