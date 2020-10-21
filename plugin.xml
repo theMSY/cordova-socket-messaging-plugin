@@ -54,5 +54,7 @@
                      target-dir="src/com/socketservice" />
 
         <framework src="io.socket:socket.io-client:+" />
+        <framework src="android.arch.lifecycle:livedata:1.1.1" />
+        <framework src="android.arch.lifecycle:extensions:1.1.1" />
     </platform>
 </plugin>
