@@ -1,4 +1,3 @@
-cordova.define("cordova-plugin-socket-service.SocketService", function(require, exports, module) {
 var exec = require('cordova/exec');
 var channel = require('cordova/channel');
 
@@ -78,4 +77,4 @@ var socketservice = {
 
 module.exports = socketservice;
 
-});
+
