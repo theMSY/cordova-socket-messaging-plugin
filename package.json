@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "background communication service for alumni app",
   "cordova": {
-    "id": "cordova-plugin-socket-service",
+    "id": "cordova-plugin-socket-service-alumni",
     "platforms": [
       "android"
     ]
